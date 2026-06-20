@@ -1,0 +1,53 @@
+{
+  "_note": "Edit this file to add, remove, or adjust rules. Reload the app to pick up changes. Each rule needs: id, name, severity (severe|structural), pattern (JS regex string), flags, message.",
+  "rules": [
+    {
+      "id": "throat_clearing",
+      "name": "Meta-Announcement",
+      "severity": "severe",
+      "pattern": "\\b(delve into|let['']s break it down|it is important to note that|it['']s worth noting that|bear in mind that|let['']s dive in|needless to say|it goes without saying|with that in mind|that being said|in this context|in this regard|suffice it to say|without further ado)\\b",
+      "flags": "gi",
+      "message": "AI throat clearing. Delete the modifier and state the assertion directly."
+    },
+    {
+      "id": "puffed_up_relevance",
+      "name": "Grandiosity Puffery",
+      "severity": "severe",
+      "pattern": "\\b(testament to|vibrant tapestry|beacon of hope|poignant reminder|intricate dance|profoundly intertwined|game.changing|groundbreaking|revolutionary|transformative|unprecedented|paradigm shift|cutting.edge|at the forefront|rich tapestry|complex (landscape|ecosystem))\\b",
+      "flags": "gi",
+      "message": "Artificial inflation of scope. Replace with clear, unembellished nouns."
+    },
+    {
+      "id": "academic_bloat",
+      "name": "PNAS Corpus Markers",
+      "severity": "structural",
+      "pattern": "\\b(underscore[sd]?|meticulous(ly)?|crucial(ly)?|imperative|pivotal|paramount|notably|comprehensive(ly)?|robust|seamless(ly)?|streamline[sd]?|facilitate[sd]?|utilizes?|leverage[sd]?|optimize[sd]?|holistic(ally)?|multifaceted|nuanced|encompasses?|constitutes?)\\b",
+      "flags": "gi",
+      "message": "High-probability LLM padding term used to mimic intellectual weight."
+    },
+    {
+      "id": "transition_formulae",
+      "name": "Formulaic Transition",
+      "severity": "structural",
+      "pattern": "^(Furthermore|Moreover|Additionally|In addition|Consequently|Therefore|Nevertheless|Nonetheless|In conclusion|In summary|To summarize|As a result|In other words|On the other hand|It is worth noting|It should be noted)[,\\s]",
+      "flags": "gim",
+      "message": "Sentence-opening transition formula. AI uses these as structural glue; human writers vary or cut them."
+    },
+    {
+      "id": "hedge_stacking",
+      "name": "Hedge Stack",
+      "severity": "structural",
+      "pattern": "\\b(may potentially|could possibly|might perhaps|seems to suggest|appears to indicate|tend to often)\\b",
+      "flags": "gi",
+      "message": "Doubled hedge. Pick one qualifier or drop both and assert directly."
+    },
+    {
+      "id": "binary_symmetry",
+      "name": "Symmetrical Contrast",
+      "severity": "structural",
+      "pattern": "(it['']s not just\\s+[\\w\\s,]+it['']s\\s+(also\\s+)?|not (only|just|merely)\\s+[\\w\\s,]+but (also\\s+)?|not because\\s+[\\w\\s]+\\s*but because)",
+      "flags": "gi",
+      "message": "Manufactured binary symmetry. Human speech drifts and digresses; it doesn't mirror."
+    }
+  ]
+}

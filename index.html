@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prose Linter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tic-severe    { background:#fee2e2; border-bottom:2px solid #f87171; color:#7f1d1d; }
+        .tic-structural{ background:#fef9c3; border-bottom:2px solid #facc15; color:#713f12; }
+        .tic-monotone  { background:#faf5ff; border-left:4px solid #a855f7; padding-left:0.5rem; }
+        .tic-custom    { background:#ecfdf5; border-bottom:2px solid #34d399; color:#064e3b; }
+        #flag-modal { display:none; }
+        #flag-modal.open { display:flex; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center shrink-0">
+        <div>
+            <h1 class="text-lg font-bold tracking-tight">Prose Linter</h1>
+            <p class="text-xs text-slate-400">Flags patterns correlated with AI writing — density matters more than presence</p>
+        </div>
+        <div class="flex items-center gap-5 text-xs font-mono text-slate-500">
+            <span id="corpus-status">corpus: loading…</span>
+            <span id="global-metrics"></span>
+            <div class="flex items-center gap-1 border border-slate-200 rounded px-1">
+                <button id="font-dec" class="px-1.5 py-0.5 hover:text-slate-900 transition-colors text-sm" title="Decrease font size">A−</button>
+                <button id="font-inc" class="px-1.5 py-0.5 hover:text-slate-900 transition-colors text-base font-medium" title="Increase font size">A+</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main -->
+    <main class="flex flex-1 overflow-hidden">
+
+        <!-- Left: source -->
+        <section class="w-1/2 h-full border-r border-slate-200 flex flex-col">
+            <div class="bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider shrink-0 flex items-center justify-between">
+                <span>Source Draft</span>
+                <div class="flex items-center gap-3">
+                    <label class="cursor-pointer flex items-center gap-1 text-slate-500 hover:text-slate-800 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        <span id="draft-label">Upload draft</span>
+                        <input id="draft-input" type="file" accept=".txt,.md,.markdown,.rst" class="hidden">
+                    </label>
+                    <label class="cursor-pointer flex items-center gap-1 text-slate-500 hover:text-slate-800 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                        <span id="rules-label">Load rules</span>
+                        <input id="rules-input" type="file" accept=".json" class="hidden">
+                    </label>
+                </div>
+            </div>
+            <textarea id="input-pane" class="flex-1 p-6 font-serif text-base leading-relaxed resize-none focus:outline-none bg-white" placeholder="Paste your draft here, or upload a .txt / .md file…"></textarea>
+        </section>
+
+        <!-- Right: analysis -->
+        <section class="w-1/2 h-full flex flex-col bg-white overflow-y-auto">
+            <div class="bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10 flex items-center justify-between">
+                <span>Analysis Map</span>
+                <div class="flex items-center gap-3">
+                    <div id="nav-controls" class="hidden items-center gap-1 text-slate-500">
+                        <button id="nav-prev" class="px-2 py-0.5 rounded hover:bg-slate-200 transition-colors" title="Previous issue (k)">↑</button>
+                        <span id="nav-counter" class="text-xs font-mono">0/0</span>
+                        <button id="nav-next" class="px-2 py-0.5 rounded hover:bg-slate-200 transition-colors" title="Next issue (j)">↓</button>
+                    </div>
+                    <button id="flag-btn" class="hidden text-slate-500 hover:text-emerald-700 transition-colors flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6H13l-1-1H5a2 2 0 00-2 2zm9-13.5V9"/></svg>
+                        Flag
+                    </button>
+                    <button id="export-btn" class="hidden text-slate-500 hover:text-slate-800 transition-colors flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        Export rules
+                    </button>
+                </div>
+            </div>
+            <div id="output-pane" class="p-6 font-serif text-base leading-relaxed whitespace-pre-wrap"></div>
+        </section>
+    </main>
+
+    <!-- Flag modal: context gate -->
+    <div id="flag-modal" class="fixed inset-0 bg-black/40 z-50 items-center justify-center">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
+            <h2 class="font-bold text-slate-900">Flag this phrase as an AI tell?</h2>
+            <p class="text-sm text-slate-500">Context check — before adding, answer honestly:</p>
+            <blockquote id="modal-phrase" class="text-sm font-serif bg-slate-50 border-l-4 border-slate-300 px-4 py-2 text-slate-700 italic"></blockquote>
+            <p class="text-sm font-medium text-slate-700">Would this phrase flag a good human writer who just happened to choose these words?</p>
+            <div class="flex gap-3">
+                <button id="modal-yes" class="flex-1 py-2 rounded bg-slate-100 text-slate-600 text-sm hover:bg-slate-200">Yes — too aggressive, skip it</button>
+                <button id="modal-no" class="flex-1 py-2 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700">No — it's a real AI tell, add it</button>
+            </div>
+            <button id="modal-cancel" class="text-xs text-slate-400 hover:text-slate-600 w-full text-center">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Utility ---
+        function escapeHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // --- State ---
+        let RULES = [];
+        let corpusWords = [];
+        let corpusRegex = null;
+        let customRules = [];
+        let pendingPhrase = '';
+        let flaggedParaOffsets = []; // char offsets of flagged paragraphs in raw text
+        let navIdx = -1;
+
+        // --- Font size ---
+        const FONT_SIZES = [12, 14, 16, 18, 20, 24];
+        let fontIdx = Math.min(Math.max(parseInt(localStorage.getItem('prose_font_idx') || '2'), 0), FONT_SIZES.length - 1);
+
+        function applyFontSize() {
+            const px = FONT_SIZES[fontIdx] + 'px';
+            document.getElementById('input-pane').style.fontSize = px;
+            document.getElementById('output-pane').style.fontSize = px;
+            localStorage.setItem('prose_font_idx', fontIdx);
+        }
+
+        document.getElementById('font-dec').addEventListener('click', () => {
+            if (fontIdx > 0) { fontIdx--; applyFontSize(); }
+        });
+        document.getElementById('font-inc').addEventListener('click', () => {
+            if (fontIdx < FONT_SIZES.length - 1) { fontIdx++; applyFontSize(); }
+        });
+
+        // --- Scroll textarea to char offset ---
+        function scrollToOffset(charOffset) {
+            const ta = document.getElementById('input-pane');
+            ta.focus();
+            ta.setSelectionRange(charOffset, charOffset);
+            // Measure how far down the cursor sits and scroll there
+            const text = ta.value.substring(0, charOffset);
+            const linesBefore = (text.match(/\n/g) || []).length;
+            const lineH = parseFloat(getComputedStyle(ta).lineHeight) || 24;
+            ta.scrollTop = Math.max(0, (linesBefore - 2) * lineH);
+        }
+
+        // --- Navigate flagged paragraphs ---
+        function updateNavUI() {
+            const ctrl = document.getElementById('nav-controls');
+            const counter = document.getElementById('nav-counter');
+            if (flaggedParaOffsets.length === 0) {
+                ctrl.classList.add('hidden'); ctrl.classList.remove('flex');
+                return;
+            }
+            ctrl.classList.remove('hidden'); ctrl.classList.add('flex');
+            counter.textContent = `${navIdx + 1}/${flaggedParaOffsets.length}`;
+        }
+
+        function navigateTo(idx) {
+            if (!flaggedParaOffsets.length) return;
+            navIdx = (idx + flaggedParaOffsets.length) % flaggedParaOffsets.length;
+            scrollToOffset(flaggedParaOffsets[navIdx]);
+            updateNavUI();
+        }
+
+        document.getElementById('nav-prev').addEventListener('click', () => navigateTo(navIdx - 1));
+        document.getElementById('nav-next').addEventListener('click', () => navigateTo(navIdx + 1));
+
+        // j/k keyboard shortcuts (only when not typing in textarea)
+        document.addEventListener('keydown', e => {
+            if (e.target === document.getElementById('input-pane')) return;
+            if (e.key === 'j') navigateTo(navIdx + 1);
+            if (e.key === 'k') navigateTo(navIdx - 1);
+        });
+
+        // --- Build corpus regex from word list ---
+        function buildCorpusRegex(words) {
+            if (!words.length) return null;
+            const pattern = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+            return new RegExp(`\\b(${pattern})\\b`, 'gi');
+        }
+
+        // --- Load rules.json ---
+        async function loadRules() {
+            try {
+                const res = await fetch('./rules.json');
+                const data = await res.json();
+                RULES = data.rules.map(r => ({
+                    ...r,
+                    regex: new RegExp(r.pattern, r.flags)
+                }));
+            } catch(e) {
+                console.warn('rules.json not loaded:', e);
+            }
+        }
+
+        // --- Load corpus.json (local, no TTL needed) ---
+        async function loadCorpus() {
+            const el = document.getElementById('corpus-status');
+            try {
+                const res = await fetch('./corpus.json');
+                const data = await res.json();
+                corpusWords = data.words || [];
+                corpusRegex = buildCorpusRegex(corpusWords);
+                el.textContent = `corpus: ${corpusWords.length} terms`;
+                runLinter();
+            } catch(e) {
+                el.textContent = 'corpus: not found (static rules only)';
+            }
+        }
+
+        // --- Burstiness ---
+        function evaluateBurstiness(text) {
+            const sentences = text.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 0);
+            if (sentences.length < 3) return { isMonotone: false, stdDev: 0 };
+            const counts = sentences.map(s => s.split(/\s+/).filter(w => w).length);
+            const mean = counts.reduce((a,b) => a+b, 0) / counts.length;
+            const stdDev = Math.sqrt(counts.reduce((s,c) => s + Math.pow(c-mean,2), 0) / counts.length);
+            return { isMonotone: stdDev < 3.8, stdDev: parseFloat(stdDev.toFixed(2)) };
+        }
+
+        // --- Sentence-starter repetition ---
+        function detectStarterRepetition(text) {
+            const sentences = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 0);
+            const starters = ['The ','This ','It ','You ','We ','They ','There '];
+            for (let i = 0; i < sentences.length - 1; i++) {
+                for (const w of starters) {
+                    if (sentences[i].startsWith(w) && sentences[i+1].startsWith(w)) return w.trim();
+                }
+            }
+            return null;
+        }
+
+        // --- Core linter ---
+        function runLinter() {
+            const rawText = document.getElementById('input-pane').value;
+            const outputPane = document.getElementById('output-pane');
+            const metricsEl = document.getElementById('global-metrics');
+            const exportBtn = document.getElementById('export-btn');
+
+            if (!rawText.trim()) { outputPane.innerHTML=''; metricsEl.innerHTML=''; return; }
+
+            const paragraphs = rawText.split(/\n\n+/);
+            const wordCount = rawText.trim().split(/\s+/).filter(w => w).length;
+            let severeCount=0, structuralCount=0, monotoneCount=0, starterCount=0, customCount=0, cleanCount=0;
+            const blocks = [];
+            flaggedParaOffsets = [];
+            navIdx = -1;
+
+            // Pre-compute char offset of each paragraph in raw text
+            const paraOffsets = [];
+            let scanPos = 0;
+            paragraphs.forEach(para => {
+                const pos = rawText.indexOf(para, scanPos);
+                paraOffsets.push(pos === -1 ? scanPos : pos);
+                scanPos = (pos === -1 ? scanPos : pos) + para.length;
+            });
+
+            paragraphs.forEach((para, idx) => {
+                if (!para.trim()) return;
+
+                const stats = evaluateBurstiness(para);
+                const starter = detectStarterRepetition(para);
+                let html = escapeHtml(para);
+                let hasTic = false;
+
+                // Static rules
+                RULES.forEach(rule => {
+                    const rx = new RegExp(rule.regex.source, rule.regex.flags);
+                    html = html.replace(rx, match => {
+                        hasTic = true;
+                        rule.severity === 'severe' ? severeCount++ : structuralCount++;
+                        const cls = rule.severity === 'severe' ? 'tic-severe' : 'tic-structural';
+                        return `<mark class="${cls} cursor-help" title="${rule.name}: ${rule.message}">${match}</mark>`;
+                    });
+                });
+
+                // Corpus — only match outside already-marked spans
+                if (corpusRegex) {
+                    const rx = new RegExp(corpusRegex.source, corpusRegex.flags);
+                    html = html.replace(/(<mark[^>]*>[\s\S]*?<\/mark>)|([^<]+)/g, (full, marked, plain) => {
+                        if (marked) return marked; // already highlighted, leave alone
+                        if (!plain) return full;
+                        return plain.replace(rx, match => {
+                            hasTic = true;
+                            structuralCount++;
+                            return `<mark class="tic-structural cursor-help" title="Corpus marker (Kobak et al. 2025): overrepresented in AI-assisted text vs. pre-2022 baseline. One hit is noise; a cluster is signal.">${match}</mark>`;
+                        });
+                    });
+                }
+
+                // Custom session rules
+                customRules.forEach(r => {
+                    const rx = new RegExp(r.regex.source, r.regex.flags);
+                    html = html.replace(rx, match => {
+                        hasTic = true;
+                        customCount++;
+                        return `<mark class="tic-custom cursor-help" title="Custom rule: ${r.message}">${match}</mark>`;
+                    });
+                });
+
+                const labels = [];
+                if (stats.isMonotone) { monotoneCount++; hasTic=true; labels.push(`rhythmic monotony (σ=${stats.stdDev})`); }
+                if (starter) { starterCount++; hasTic=true; labels.push(`repeated opener: "${starter}"`); }
+
+                const offset = paraOffsets[idx] ?? 0;
+                const paraLabel = `<button class="para-link text-xs font-mono text-slate-400 hover:text-slate-700 underline-offset-2 hover:underline mr-1" data-offset="${offset}">¶${idx+1}</button>`;
+
+                const labelSuffix = labels.length ? ` — ${labels.join(' · ')}` : '';
+                const label = `<div class="mb-1">${paraLabel}<span class="text-xs font-mono text-slate-400">${labelSuffix}</span></div>`;
+
+                if (hasTic) {
+                    flaggedParaOffsets.push(offset);
+                    const wrap = stats.isMonotone ? 'tic-monotone' : '';
+                    blocks.push(`<div class="mb-4">${label}<div class="${wrap}">${html}</div></div>`);
+                } else {
+                    cleanCount++;
+                    blocks.push(`<div class="mb-2">${paraLabel}<span class="text-xs font-mono text-slate-300">— clean</span></div>`);
+                }
+            });
+
+            const total = severeCount + structuralCount + monotoneCount + starterCount + customCount;
+            const lexicalCount = severeCount + structuralCount + customCount;
+            const density = wordCount > 0 ? ((lexicalCount / wordCount) * 1000).toFixed(1) : '0.0';
+            const densityNum = parseFloat(density);
+            const densityCol = densityNum < 3 ? 'text-green-600' : densityNum < 8 ? 'text-yellow-700' : 'text-red-600';
+            const densityNote = densityNum < 3 ? 'within human baseline' : densityNum < 8 ? 'moderate — examine clusters' : 'high — strong signal';
+            const col = total===0 ? 'text-green-600' : severeCount>0 ? 'text-red-600' : 'text-yellow-600';
+            const summary = `<div class="mb-6 p-3 rounded bg-slate-50 border border-slate-200 text-xs font-mono space-y-1">
+                <div class="${col} font-bold">${total} flag${total!==1?'s':''} across ${paragraphs.filter(p=>p.trim()).length} paragraphs · ${wordCount} words</div>
+                <div class="${densityCol}">lexical density: ${density}/1000w — ${densityNote}</div>
+                ${severeCount ? `<div class="text-red-600">● ${severeCount} severe</div>` : ''}
+                ${structuralCount ? `<div class="text-yellow-700">● ${structuralCount} structural / corpus</div>` : ''}
+                ${monotoneCount ? `<div class="text-purple-600">● ${monotoneCount} flat rhythm (softest signal)</div>` : ''}
+                ${starterCount ? `<div class="text-purple-600">● ${starterCount} repeated opener</div>` : ''}
+                ${customCount ? `<div class="text-emerald-700">● ${customCount} custom rule</div>` : ''}
+                ${cleanCount ? `<div class="text-slate-400">✓ ${cleanCount} clean</div>` : ''}
+                <div class="text-slate-400 border-t border-slate-200 pt-1 mt-1">Signals, not verdicts. Good human writers trigger some rules. Isolated corpus hits ≠ AI; dense clusters are diagnostic.</div>
+            </div>`;
+
+            outputPane.innerHTML = summary + blocks.join('');
+            metricsEl.innerHTML = `<span class="${col} font-semibold">${total} flag${total!==1?'s':''}</span> <span class="${densityCol}">${density}/1000w</span>`;
+            exportBtn.classList.toggle('hidden', customRules.length === 0);
+
+            // Wire ¶N click → scroll textarea
+            outputPane.querySelectorAll('.para-link').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const offset = parseInt(btn.dataset.offset);
+                    scrollToOffset(offset);
+                    // sync nav index
+                    const fi = flaggedParaOffsets.indexOf(offset);
+                    if (fi !== -1) { navIdx = fi; updateNavUI(); }
+                });
+            });
+
+            if (flaggedParaOffsets.length) navIdx = 0;
+            updateNavUI();
+        }
+
+        // --- File uploads ---
+        function readFile(file, onLoad) {
+            const r = new FileReader();
+            r.onload = e => onLoad(e.target.result, file.name);
+            r.readAsText(file);
+        }
+
+        document.getElementById('draft-input').addEventListener('change', e => {
+            const f = e.target.files[0]; if (!f) return;
+            readFile(f, (text, name) => {
+                document.getElementById('input-pane').value = text;
+                document.getElementById('draft-label').textContent = name;
+                runLinter();
+            });
+        });
+
+        document.getElementById('rules-input').addEventListener('change', e => {
+            const f = e.target.files[0]; if (!f) return;
+            readFile(f, (text, name) => {
+                try {
+                    const data = JSON.parse(text);
+                    const loaded = (data.rules || []).map(r => ({ ...r, regex: new RegExp(r.pattern, r.flags) }));
+                    RULES = [...RULES, ...loaded];
+                    document.getElementById('rules-label').textContent = `+${loaded.length} rules`;
+                    runLinter();
+                } catch(err) {
+                    alert('Invalid rules JSON: ' + err.message);
+                }
+            });
+        });
+
+        // Drag-and-drop on textarea
+        const inputPane = document.getElementById('input-pane');
+        inputPane.addEventListener('dragover', e => { e.preventDefault(); inputPane.classList.add('bg-blue-50'); });
+        inputPane.addEventListener('dragleave', () => inputPane.classList.remove('bg-blue-50'));
+        inputPane.addEventListener('drop', e => {
+            e.preventDefault(); inputPane.classList.remove('bg-blue-50');
+            const f = e.dataTransfer.files[0]; if (!f) return;
+            readFile(f, (text, name) => {
+                inputPane.value = text;
+                document.getElementById('draft-label').textContent = name;
+                runLinter();
+            });
+        });
+
+        // --- Flag selection flow ---
+        const flagBtn = document.getElementById('flag-btn');
+        const modal = document.getElementById('flag-modal');
+
+        document.addEventListener('selectionchange', () => {
+            const sel = window.getSelection();
+            const phrase = sel ? sel.toString().trim() : '';
+            flagBtn.classList.toggle('hidden', phrase.length < 3);
+            if (phrase.length >= 3) pendingPhrase = phrase;
+        });
+
+        flagBtn.addEventListener('click', () => {
+            document.getElementById('modal-phrase').textContent = `"${pendingPhrase}"`;
+            modal.classList.add('open');
+        });
+
+        document.getElementById('modal-yes').addEventListener('click', () => modal.classList.remove('open'));
+        document.getElementById('modal-cancel').addEventListener('click', () => modal.classList.remove('open'));
+
+        document.getElementById('modal-no').addEventListener('click', () => {
+            modal.classList.remove('open');
+            // Escape the phrase for use as a literal regex
+            const escaped = pendingPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            customRules.push({
+                id: `custom_${Date.now()}`,
+                name: 'Custom',
+                severity: 'custom',
+                pattern: escaped,
+                flags: 'gi',
+                message: `Flagged by user: "${pendingPhrase}"`,
+                regex: new RegExp(escaped, 'gi')
+            });
+            runLinter();
+        });
+
+        // --- Export custom rules ---
+        document.getElementById('export-btn').addEventListener('click', () => {
+            const out = {
+                _note: "Custom rules flagged during session. Merge into rules.json to make permanent.",
+                rules: customRules.map(({ regex, ...r }) => r)
+            };
+            const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'custom-rules.json';
+            a.click();
+        });
+
+        // --- Init ---
+        applyFontSize();
+        inputPane.addEventListener('input', runLinter);
+        Promise.all([loadRules(), loadCorpus()]);
+    </script>
+</body>
+</html>
