@@ -69,6 +69,10 @@
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6H13l-1-1H5a2 2 0 00-2 2zm9-13.5V9"/></svg>
                         Flag
                     </button>
+                    <button id="export-annotated-btn" class="hidden text-slate-500 hover:text-slate-800 transition-colors flex items-center gap-1">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                        Export annotated
+                    </button>
                     <button id="export-btn" class="hidden text-slate-500 hover:text-slate-800 transition-colors flex items-center gap-1">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                         Export rules
@@ -108,6 +112,7 @@
         let pendingPhrase = '';
         let flaggedParaOffsets = []; // char offsets of flagged paragraphs in raw text
         let navIdx = -1;
+        let lastExportData = null;
 
         // --- Font size ---
         const FONT_SIZES = [12, 14, 16, 18, 20, 24];
@@ -239,6 +244,7 @@
             const wordCount = rawText.trim().split(/\s+/).filter(w => w).length;
             let severeCount=0, structuralCount=0, monotoneCount=0, starterCount=0, customCount=0, cleanCount=0;
             const blocks = [];
+            const exportData = [];
             flaggedParaOffsets = [];
             navIdx = -1;
 
@@ -258,6 +264,7 @@
                 const starter = detectStarterRepetition(para);
                 let html = escapeHtml(para);
                 let hasTic = false;
+                const paraFindings = [];
 
                 // Static rules
                 RULES.forEach(rule => {
@@ -265,6 +272,7 @@
                     html = html.replace(rx, match => {
                         hasTic = true;
                         rule.severity === 'severe' ? severeCount++ : structuralCount++;
+                        paraFindings.push({ severity: rule.severity, kind: 'rule', ruleName: rule.name, match, message: rule.message });
                         const cls = rule.severity === 'severe' ? 'tic-severe' : 'tic-structural';
                         return `<mark class="${cls} cursor-help" title="${rule.name}: ${rule.message}">${match}</mark>`;
                     });
@@ -279,6 +287,7 @@
                         return plain.replace(rx, match => {
                             hasTic = true;
                             structuralCount++;
+                            paraFindings.push({ severity: 'structural', kind: 'corpus', ruleName: 'Corpus (Kobak et al. 2025)', match, message: 'Overrepresented in AI-assisted text vs. pre-2022 baseline. One hit is noise; a cluster is signal.' });
                             return `<mark class="tic-structural cursor-help" title="Corpus marker (Kobak et al. 2025): overrepresented in AI-assisted text vs. pre-2022 baseline. One hit is noise; a cluster is signal.">${match}</mark>`;
                         });
                     });
@@ -290,6 +299,7 @@
                     html = html.replace(rx, match => {
                         hasTic = true;
                         customCount++;
+                        paraFindings.push({ severity: 'custom', kind: 'custom', ruleName: 'Custom', match, message: r.message });
                         return `<mark class="tic-custom cursor-help" title="Custom rule: ${r.message}">${match}</mark>`;
                     });
                 });
@@ -312,6 +322,7 @@
                     cleanCount++;
                     blocks.push(`<div class="mb-2">${paraLabel}<span class="text-xs font-mono text-slate-300">— clean</span></div>`);
                 }
+                exportData.push({ para: idx+1, findings: paraFindings, isMonotone: stats.isMonotone, stdDev: stats.stdDev, starter });
             });
 
             const total = severeCount + structuralCount + monotoneCount + starterCount + customCount;
@@ -333,9 +344,11 @@
                 <div class="text-slate-400 border-t border-slate-200 pt-1 mt-1">Signals, not verdicts. Good human writers trigger some rules. Isolated corpus hits ≠ AI; dense clusters are diagnostic.</div>
             </div>`;
 
+            lastExportData = { paras: exportData, summary: { total, wordCount, density, densityNote, severeCount, structuralCount, monotoneCount, starterCount, customCount } };
             outputPane.innerHTML = summary + blocks.join('');
             metricsEl.innerHTML = `<span class="${col} font-semibold">${total} flag${total!==1?'s':''}</span> <span class="${densityCol}">${density}/1000w</span>`;
             exportBtn.classList.toggle('hidden', customRules.length === 0);
+            document.getElementById('export-annotated-btn').classList.toggle('hidden', total === 0);
 
             // Wire ¶N click → scroll textarea
             outputPane.querySelectorAll('.para-link').forEach(btn => {
@@ -431,6 +444,70 @@
             });
             runLinter();
         });
+
+        // --- Export annotated HTML ---
+        function exportAnnotated() {
+            if (!lastExportData) return;
+            const paneHtml = document.getElementById('output-pane').innerHTML;
+            const s = lastExportData.summary;
+            const exportDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+
+            // Build numbered findings list
+            let findingsHtml = '';
+            let n = 0;
+            for (const p of lastExportData.paras) {
+                for (const f of p.findings) {
+                    n++;
+                    const sev = f.severity === 'severe' ? 'SEV' : f.kind === 'corpus' ? 'CRP' : f.severity === 'custom' ? 'CST' : 'STR';
+                    const cls = f.severity === 'severe' ? 'sev-severe' : f.severity === 'custom' ? 'sev-custom' : 'sev-str';
+                    findingsHtml += `<div class="finding"><span class="sev ${cls}">${sev}</span> ¶${p.para} · ${f.ruleName} · &ldquo;${f.match}&rdquo; &mdash; ${f.message}</div>\n`;
+                }
+                if (p.isMonotone) { n++; findingsHtml += `<div class="finding"><span class="sev sev-rhy">RHY</span> ¶${p.para} · flat rhythm (σ=${p.stdDev}) — sentence lengths too uniform (softest signal)</div>\n`; }
+                if (p.starter)    { n++; findingsHtml += `<div class="finding"><span class="sev sev-rhy">RPT</span> ¶${p.para} · repeated opener &ldquo;${p.starter}&rdquo;</div>\n`; }
+            }
+
+            // Minimal CSS covering the Tailwind utility classes present in paneHtml
+            const twCss = `.text-xs{font-size:.75rem;line-height:1rem}.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.font-bold{font-weight:700}.font-semibold{font-weight:600}.text-red-600{color:#dc2626}.text-yellow-700{color:#b45309}.text-purple-600{color:#9333ea}.text-emerald-700{color:#047857}.text-slate-400{color:#94a3b8}.text-slate-300{color:#cbd5e1}.mb-6{margin-bottom:1.5rem}.mb-4{margin-bottom:1rem}.mb-2{margin-bottom:.5rem}.mb-1{margin-bottom:.25rem}.mt-1{margin-top:.25rem}.pt-1{padding-top:.25rem}.p-3{padding:.75rem}.space-y-1>*+*{margin-top:.25rem}.bg-slate-50{background:#f8fafc}.border{border-width:1px;border-style:solid}.border-slate-200{border-color:#e2e8f0}.border-t{border-top-width:1px;border-top-style:solid}.rounded{border-radius:.25rem}.para-link{display:none}.cursor-help{cursor:help}`;
+
+            const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prose Linter — Annotated Review</title>
+<style>
+body{font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.75;max-width:780px;margin:2rem auto;padding:0 1.5rem;color:#1e293b;}
+h1{font-size:1rem;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 0 .25rem;}
+.meta{font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#64748b;margin-bottom:2.5rem;border-bottom:1px solid #e2e8f0;padding-bottom:1rem;}
+.tic-severe{background:#fee2e2;border-bottom:2px solid #f87171;color:#7f1d1d;position:relative;}
+.tic-structural{background:#fef9c3;border-bottom:2px solid #facc15;color:#713f12;position:relative;}
+.tic-monotone{background:#faf5ff;border-left:4px solid #a855f7;padding-left:.5rem;}
+.tic-custom{background:#ecfdf5;border-bottom:2px solid #34d399;color:#064e3b;position:relative;}
+mark[title]{cursor:help;}
+mark[title]:hover::after{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:0;background:#1e293b;color:#f8fafc;padding:5px 10px;border-radius:4px;font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;white-space:normal;width:300px;z-index:10;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.25);}
+.findings{margin-top:3rem;border-top:2px solid #e2e8f0;padding-top:1.5rem;}
+.findings h2{font-size:.875rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;margin-bottom:1rem;color:#475569;}
+.finding{margin-bottom:.6rem;font-size:.8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;color:#334155;}
+.sev{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.65rem;font-weight:700;margin-right:.4rem;vertical-align:middle;}
+.sev-severe{background:#fee2e2;color:#991b1b;}.sev-str{background:#fef9c3;color:#92400e;}.sev-custom{background:#ecfdf5;color:#065f46;}.sev-rhy{background:#faf5ff;color:#6b21a8;}
+${twCss}
+</style>
+</head>
+<body>
+<h1>Prose Linter — Annotated Review</h1>
+<div class="meta">${s.total} flags &middot; ${s.wordCount} words &middot; lexical density ${s.density}/1000w (${s.densityNote}) &middot; ${exportDate}<br>Signals, not verdicts. Isolated corpus hits &ne; AI; dense clusters are diagnostic.</div>
+<div>${paneHtml}</div>
+<div class="findings"><h2>Findings (${n})</h2>${findingsHtml}</div>
+</body>
+</html>`;
+
+            const blob = new Blob([html], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'annotated-review.html';
+            a.click();
+        }
+
+        document.getElementById('export-annotated-btn').addEventListener('click', exportAnnotated);
 
         // --- Export custom rules ---
         document.getElementById('export-btn').addEventListener('click', () => {

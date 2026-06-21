@@ -9,6 +9,7 @@ Usage:
   lint.py --json [file]  JSON output (for chaining / skill use)
 """
 import argparse
+import html as htmllib
 import json
 import math
 import re
@@ -238,6 +239,135 @@ def format_text(result: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# HTML export
+# ---------------------------------------------------------------------------
+
+def _render_paragraph_html(para: str, rules: list[dict], corpus_regex: re.Pattern | None) -> str:
+    """Build marked-up HTML for one paragraph, with overlap prevention (rules win over corpus)."""
+    marks: list[tuple[int, int, str, str]] = []
+    occupied: list[tuple[int, int]] = []
+
+    for rule in rules:
+        for m in rule['regex'].finditer(para):
+            start, end = m.start(), m.end()
+            if any(s < end and e2 > start for s, e2 in occupied):
+                continue
+            cls = 'tic-severe' if rule['severity'] == 'severe' else 'tic-structural'
+            title = f"{rule['name']}: {rule['message']}"
+            marks.append((start, end, cls, title))
+            occupied.append((start, end))
+
+    if corpus_regex:
+        for m in corpus_regex.finditer(para):
+            start, end = m.start(), m.end()
+            if any(s < end and e2 > start for s, e2 in occupied):
+                continue
+            title = ('Corpus (Kobak et al. 2025): Overrepresented in AI-assisted text '
+                     'vs. pre-2022 baseline. One hit is noise; a cluster is signal.')
+            marks.append((start, end, 'tic-structural', title))
+            occupied.append((start, end))
+
+    marks.sort(key=lambda x: x[0])
+    out: list[str] = []
+    pos = 0
+    for start, end, cls, title in marks:
+        if pos < start:
+            out.append(htmllib.escape(para[pos:start]))
+        out.append(f'<mark class="{cls}" title="{htmllib.escape(title)}">'
+                   f'{htmllib.escape(para[start:end])}</mark>')
+        pos = end
+    if pos < len(para):
+        out.append(htmllib.escape(para[pos:]))
+    return ''.join(out)
+
+
+def format_html(text: str, result: dict, rules: list[dict], corpus_regex: re.Pattern | None) -> str:
+    paragraphs = [p for p in re.split(r'\n\n+', text) if p.strip()]
+    s = result['summary']
+
+    # Paragraph blocks
+    para_blocks: list[str] = []
+    for i, para in enumerate(paragraphs, 1):
+        para_html = _render_paragraph_html(para, rules, corpus_regex)
+        is_monotone = any(m['para'] == i for m in result['monotone'])
+        starter = next((x['starter'] for x in result['starters'] if x['para'] == i), None)
+        labels = []
+        if is_monotone:
+            std_dev = next(m['std_dev'] for m in result['monotone'] if m['para'] == i)
+            labels.append(f'flat rhythm (σ={std_dev})')
+        if starter:
+            labels.append(f'repeated opener: &ldquo;{htmllib.escape(starter)}&rdquo;')
+        label_str = f' &mdash; {" &middot; ".join(labels)}' if labels else ''
+        monotone_cls = ' tic-monotone' if is_monotone else ''
+        para_blocks.append(
+            f'<div class="pb">'
+            f'<div class="pl">¶{i}{label_str}</div>'
+            f'<div class="pt{monotone_cls}">{para_html}</div>'
+            f'</div>'
+        )
+
+    # Findings list
+    findings_lines: list[str] = []
+    n = 0
+    for f in result['findings']:
+        n += 1
+        sev = 'SEV' if f['severity'] == 'severe' else 'CRP' if f['kind'] == 'corpus' else 'CST' if f['severity'] == 'custom' else 'STR'
+        cls = 'sev-severe' if f['severity'] == 'severe' else 'sev-custom' if f['severity'] == 'custom' else 'sev-str'
+        findings_lines.append(
+            f'<div class="finding"><span class="sev {cls}">{sev}</span> '
+            f'¶{f["para"]} &middot; {htmllib.escape(f["rule_name"])} &middot; '
+            f'&ldquo;{htmllib.escape(f["match"])}&rdquo; &mdash; {htmllib.escape(f["message"])}</div>'
+        )
+    for m in result['monotone']:
+        n += 1
+        findings_lines.append(
+            f'<div class="finding"><span class="sev sev-rhy">RHY</span> '
+            f'¶{m["para"]} &middot; flat rhythm (&sigma;={m["std_dev"]}) &mdash; '
+            f'sentence lengths too uniform (softest signal)</div>'
+        )
+    for st in result['starters']:
+        n += 1
+        findings_lines.append(
+            f'<div class="finding"><span class="sev sev-rhy">RPT</span> '
+            f'¶{st["para"]} &middot; repeated opener &ldquo;{htmllib.escape(st["starter"])}&rdquo;</div>'
+        )
+
+    from datetime import date
+    export_date = date.today().strftime('%b %-d, %Y')
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Prose Linter — Annotated Review</title>
+<style>
+body{{font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.75;max-width:780px;margin:2rem auto;padding:0 1.5rem;color:#1e293b;}}
+h1{{font-size:1rem;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin:0 0 .25rem;}}
+.meta{{font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#64748b;margin-bottom:2.5rem;border-bottom:1px solid #e2e8f0;padding-bottom:1rem;}}
+.tic-severe{{background:#fee2e2;border-bottom:2px solid #f87171;color:#7f1d1d;position:relative;}}
+.tic-structural{{background:#fef9c3;border-bottom:2px solid #facc15;color:#713f12;position:relative;}}
+.tic-monotone{{background:#faf5ff;border-left:4px solid #a855f7;padding-left:.5rem;}}
+.tic-custom{{background:#ecfdf5;border-bottom:2px solid #34d399;color:#064e3b;position:relative;}}
+mark[title]{{cursor:help;}}
+mark[title]:hover::after{{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:0;background:#1e293b;color:#f8fafc;padding:5px 10px;border-radius:4px;font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;white-space:normal;width:300px;z-index:10;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.25);}}
+.pb{{margin-bottom:1.25rem;}}.pl{{font-size:.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#94a3b8;margin-bottom:.2rem;}}.pt{{white-space:pre-wrap;}}
+.findings{{margin-top:3rem;border-top:2px solid #e2e8f0;padding-top:1.5rem;}}
+.findings h2{{font-size:.875rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;margin-bottom:1rem;color:#475569;}}
+.finding{{margin-bottom:.6rem;font-size:.8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;color:#334155;}}
+.sev{{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.65rem;font-weight:700;margin-right:.4rem;vertical-align:middle;}}
+.sev-severe{{background:#fee2e2;color:#991b1b;}}.sev-str{{background:#fef9c3;color:#92400e;}}.sev-custom{{background:#ecfdf5;color:#065f46;}}.sev-rhy{{background:#faf5ff;color:#6b21a8;}}
+</style>
+</head>
+<body>
+<h1>Prose Linter &mdash; Annotated Review</h1>
+<div class="meta">{s["total"]} flags &middot; {s["word_count"]} words &middot; lexical density {s["lexical_density"]}/1000w ({s["density_label"]}) &middot; {export_date}<br>Signals, not verdicts. Isolated corpus hits &ne; AI; dense clusters are diagnostic.</div>
+{''.join(para_blocks)}
+<div class="findings"><h2>Findings ({n})</h2>{''.join(findings_lines)}</div>
+</body>
+</html>'''
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -248,6 +378,8 @@ def main() -> None:
     )
     parser.add_argument('file', nargs='?', help='file to lint (default: stdin)')
     parser.add_argument('--json', action='store_true', dest='json_output', help='emit JSON')
+    parser.add_argument('--html', action='store_true', dest='html_output',
+                        help='emit self-contained HTML (hover tooltips + findings list)')
     args = parser.parse_args()
 
     text = Path(args.file).read_text() if args.file else sys.stdin.read()
@@ -261,6 +393,8 @@ def main() -> None:
 
     if args.json_output:
         print(json.dumps(result, indent=2))
+    elif args.html_output:
+        print(format_html(text, result, rules, corpus_regex))
     else:
         print(format_text(result))
 
