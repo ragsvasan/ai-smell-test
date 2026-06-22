@@ -10,6 +10,7 @@
         .tic-structural{ background:#fef9c3; border-bottom:2px solid #facc15; color:#713f12; }
         .tic-monotone  { background:#faf5ff; border-left:4px solid #a855f7; padding-left:0.5rem; }
         .tic-custom    { background:#ecfdf5; border-bottom:2px solid #34d399; color:#064e3b; }
+        .tic-soft      { background:#e0f2fe; border-bottom:2px dotted #38bdf8; color:#075985; }
         #flag-modal { display:none; }
         #flag-modal.open { display:flex; }
     </style>
@@ -219,6 +220,17 @@
             return { isMonotone: stdDev < 3.8, stdDev: parseFloat(stdDev.toFixed(2)) };
         }
 
+        // --- Paragraph-length uniformity (document-level, soft structural signal) ---
+        function evaluateParagraphUniformity(paras) {
+            const counts = paras.filter(p => p.trim()).map(p => p.trim().split(/\s+/).filter(w => w).length);
+            if (counts.length < 4) return { flagged: false, cv: 0 };
+            const mean = counts.reduce((a,b) => a+b, 0) / counts.length;
+            if (mean < 25) return { flagged: false, cv: 0 }; // lists / short blocks, not prose
+            const stdDev = Math.sqrt(counts.reduce((s,c) => s + Math.pow(c-mean,2), 0) / counts.length);
+            const cv = stdDev / mean;
+            return { flagged: cv < 0.30, cv: parseFloat(cv.toFixed(2)) };
+        }
+
         // --- Sentence-starter repetition ---
         function detectStarterRepetition(text) {
             const sentences = text.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 0);
@@ -242,7 +254,7 @@
 
             const paragraphs = rawText.split(/\n\n+/);
             const wordCount = rawText.trim().split(/\s+/).filter(w => w).length;
-            let severeCount=0, structuralCount=0, monotoneCount=0, starterCount=0, customCount=0, cleanCount=0;
+            let severeCount=0, structuralCount=0, monotoneCount=0, starterCount=0, customCount=0, softCount=0, cleanCount=0;
             const blocks = [];
             const exportData = [];
             flaggedParaOffsets = [];
@@ -271,9 +283,11 @@
                     const rx = new RegExp(rule.regex.source, rule.regex.flags);
                     html = html.replace(rx, match => {
                         hasTic = true;
-                        rule.severity === 'severe' ? severeCount++ : structuralCount++;
+                        let cls;
+                        if (rule.severity === 'severe') { severeCount++; cls = 'tic-severe'; }
+                        else if (rule.severity === 'structural-soft') { softCount++; cls = 'tic-soft'; }
+                        else { structuralCount++; cls = 'tic-structural'; }
                         paraFindings.push({ severity: rule.severity, kind: 'rule', ruleName: rule.name, match, message: rule.message });
-                        const cls = rule.severity === 'severe' ? 'tic-severe' : 'tic-structural';
                         return `<mark class="${cls} cursor-help" title="${rule.name}: ${rule.message}">${match}</mark>`;
                     });
                 });
@@ -325,7 +339,8 @@
                 exportData.push({ para: idx+1, findings: paraFindings, isMonotone: stats.isMonotone, stdDev: stats.stdDev, starter });
             });
 
-            const total = severeCount + structuralCount + monotoneCount + starterCount + customCount;
+            const paraUniformity = evaluateParagraphUniformity(paragraphs);
+            const total = severeCount + structuralCount + monotoneCount + starterCount + customCount + softCount + (paraUniformity.flagged ? 1 : 0);
             const lexicalCount = severeCount + structuralCount + customCount;
             const density = wordCount > 0 ? ((lexicalCount / wordCount) * 1000).toFixed(1) : '0.0';
             const densityNum = parseFloat(density);
@@ -337,14 +352,16 @@
                 <div class="${densityCol}">lexical density: ${density}/1000w — ${densityNote}</div>
                 ${severeCount ? `<div class="text-red-600">● ${severeCount} severe</div>` : ''}
                 ${structuralCount ? `<div class="text-yellow-700">● ${structuralCount} structural / corpus</div>` : ''}
+                ${softCount ? `<div class="text-sky-700">● ${softCount} structural shape (soft signal, excl. density)</div>` : ''}
+                ${paraUniformity.flagged ? `<div class="text-sky-700">● uniform paragraph lengths (CV=${paraUniformity.cv}, soft signal)</div>` : ''}
                 ${monotoneCount ? `<div class="text-purple-600">● ${monotoneCount} flat rhythm (softest signal)</div>` : ''}
                 ${starterCount ? `<div class="text-purple-600">● ${starterCount} repeated opener</div>` : ''}
                 ${customCount ? `<div class="text-emerald-700">● ${customCount} custom rule</div>` : ''}
                 ${cleanCount ? `<div class="text-slate-400">✓ ${cleanCount} clean</div>` : ''}
-                <div class="text-slate-400 border-t border-slate-200 pt-1 mt-1">Signals, not verdicts. Good human writers trigger some rules. Isolated corpus hits ≠ AI; dense clusters are diagnostic.</div>
+                <div class="text-slate-400 border-t border-slate-200 pt-1 mt-1">Signals, not verdicts. Good human writers trigger some rules. Isolated corpus hits ≠ AI; dense clusters are diagnostic. Soft signals (shape, rhythm) are excluded from density.</div>
             </div>`;
 
-            lastExportData = { paras: exportData, summary: { total, wordCount, density, densityNote, severeCount, structuralCount, monotoneCount, starterCount, customCount } };
+            lastExportData = { paras: exportData, paraUniformity, summary: { total, wordCount, density, densityNote, severeCount, structuralCount, monotoneCount, starterCount, customCount, softCount } };
             outputPane.innerHTML = summary + blocks.join('');
             metricsEl.innerHTML = `<span class="${col} font-semibold">${total} flag${total!==1?'s':''}</span> <span class="${densityCol}">${density}/1000w</span>`;
             exportBtn.classList.toggle('hidden', customRules.length === 0);
@@ -458,16 +475,19 @@
             for (const p of lastExportData.paras) {
                 for (const f of p.findings) {
                     n++;
-                    const sev = f.severity === 'severe' ? 'SEV' : f.kind === 'corpus' ? 'CRP' : f.severity === 'custom' ? 'CST' : 'STR';
-                    const cls = f.severity === 'severe' ? 'sev-severe' : f.severity === 'custom' ? 'sev-custom' : 'sev-str';
+                    const sev = f.severity === 'severe' ? 'SEV' : f.severity === 'structural-soft' ? 'SFT' : f.kind === 'corpus' ? 'CRP' : f.severity === 'custom' ? 'CST' : 'STR';
+                    const cls = f.severity === 'severe' ? 'sev-severe' : f.severity === 'structural-soft' ? 'sev-soft' : f.severity === 'custom' ? 'sev-custom' : 'sev-str';
                     findingsHtml += `<div class="finding"><span class="sev ${cls}">${sev}</span> ¶${p.para} · ${f.ruleName} · &ldquo;${f.match}&rdquo; &mdash; ${f.message}</div>\n`;
                 }
                 if (p.isMonotone) { n++; findingsHtml += `<div class="finding"><span class="sev sev-rhy">RHY</span> ¶${p.para} · flat rhythm (σ=${p.stdDev}) — sentence lengths too uniform (softest signal)</div>\n`; }
                 if (p.starter)    { n++; findingsHtml += `<div class="finding"><span class="sev sev-rhy">RPT</span> ¶${p.para} · repeated opener &ldquo;${p.starter}&rdquo;</div>\n`; }
             }
+            if (lastExportData.paraUniformity && lastExportData.paraUniformity.flagged) {
+                n++; findingsHtml += `<div class="finding"><span class="sev sev-soft">PUN</span> document · uniform paragraph lengths (CV=${lastExportData.paraUniformity.cv}) — soft structural signal</div>\n`;
+            }
 
             // Minimal CSS covering the Tailwind utility classes present in paneHtml
-            const twCss = `.text-xs{font-size:.75rem;line-height:1rem}.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.font-bold{font-weight:700}.font-semibold{font-weight:600}.text-red-600{color:#dc2626}.text-yellow-700{color:#b45309}.text-purple-600{color:#9333ea}.text-emerald-700{color:#047857}.text-slate-400{color:#94a3b8}.text-slate-300{color:#cbd5e1}.mb-6{margin-bottom:1.5rem}.mb-4{margin-bottom:1rem}.mb-2{margin-bottom:.5rem}.mb-1{margin-bottom:.25rem}.mt-1{margin-top:.25rem}.pt-1{padding-top:.25rem}.p-3{padding:.75rem}.space-y-1>*+*{margin-top:.25rem}.bg-slate-50{background:#f8fafc}.border{border-width:1px;border-style:solid}.border-slate-200{border-color:#e2e8f0}.border-t{border-top-width:1px;border-top-style:solid}.rounded{border-radius:.25rem}.para-link{display:none}.cursor-help{cursor:help}`;
+            const twCss = `.text-xs{font-size:.75rem;line-height:1rem}.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.font-bold{font-weight:700}.font-semibold{font-weight:600}.text-red-600{color:#dc2626}.text-yellow-700{color:#b45309}.text-purple-600{color:#9333ea}.text-emerald-700{color:#047857}.text-sky-700{color:#0369a1}.text-slate-400{color:#94a3b8}.text-slate-300{color:#cbd5e1}.mb-6{margin-bottom:1.5rem}.mb-4{margin-bottom:1rem}.mb-2{margin-bottom:.5rem}.mb-1{margin-bottom:.25rem}.mt-1{margin-top:.25rem}.pt-1{padding-top:.25rem}.p-3{padding:.75rem}.space-y-1>*+*{margin-top:.25rem}.bg-slate-50{background:#f8fafc}.border{border-width:1px;border-style:solid}.border-slate-200{border-color:#e2e8f0}.border-t{border-top-width:1px;border-top-style:solid}.rounded{border-radius:.25rem}.para-link{display:none}.cursor-help{cursor:help}`;
 
             const html = `<!DOCTYPE html>
 <html lang="en">
@@ -482,13 +502,14 @@ h1{font-size:1rem;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,
 .tic-structural{background:#fef9c3;border-bottom:2px solid #facc15;color:#713f12;position:relative;}
 .tic-monotone{background:#faf5ff;border-left:4px solid #a855f7;padding-left:.5rem;}
 .tic-custom{background:#ecfdf5;border-bottom:2px solid #34d399;color:#064e3b;position:relative;}
+.tic-soft{background:#e0f2fe;border-bottom:2px dotted #38bdf8;color:#075985;position:relative;}
 mark[title]{cursor:help;}
 mark[title]:hover::after{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:0;background:#1e293b;color:#f8fafc;padding:5px 10px;border-radius:4px;font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;white-space:normal;width:300px;z-index:10;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.25);}
 .findings{margin-top:3rem;border-top:2px solid #e2e8f0;padding-top:1.5rem;}
 .findings h2{font-size:.875rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;margin-bottom:1rem;color:#475569;}
 .finding{margin-bottom:.6rem;font-size:.8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;color:#334155;}
 .sev{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.65rem;font-weight:700;margin-right:.4rem;vertical-align:middle;}
-.sev-severe{background:#fee2e2;color:#991b1b;}.sev-str{background:#fef9c3;color:#92400e;}.sev-custom{background:#ecfdf5;color:#065f46;}.sev-rhy{background:#faf5ff;color:#6b21a8;}
+.sev-severe{background:#fee2e2;color:#991b1b;}.sev-str{background:#fef9c3;color:#92400e;}.sev-custom{background:#ecfdf5;color:#065f46;}.sev-rhy{background:#faf5ff;color:#6b21a8;}.sev-soft{background:#e0f2fe;color:#075985;}
 ${twCss}
 </style>
 </head>

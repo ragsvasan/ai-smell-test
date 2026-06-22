@@ -18,6 +18,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
 BURSTINESS_THRESHOLD = 3.8
+PARAGRAPH_UNIFORMITY_CV = 0.30
 DENSITY_MODERATE = 3.0
 DENSITY_HIGH = 8.0
 STARTERS = ['The ', 'This ', 'It ', 'You ', 'We ', 'They ', 'There ']
@@ -80,6 +81,19 @@ def detect_starter_repetition(text: str) -> str | None:
             if sentences[i].startswith(w) and sentences[i + 1].startswith(w):
                 return w.strip()
     return None
+
+
+def evaluate_paragraph_uniformity(paragraphs: list[str]) -> tuple[bool, float]:
+    """Document-level: are paragraph lengths suspiciously uniform? Soft structural signal."""
+    counts = [len(p.split()) for p in paragraphs if p.strip()]
+    if len(counts) < 4:
+        return False, 0.0
+    mean = sum(counts) / len(counts)
+    if mean < 25:  # lists / short blocks, not prose
+        return False, 0.0
+    std_dev = math.sqrt(sum((c - mean) ** 2 for c in counts) / len(counts))
+    cv = std_dev / mean
+    return cv < PARAGRAPH_UNIFORMITY_CV, round(cv, 2)
 
 
 # ---------------------------------------------------------------------------
@@ -145,8 +159,11 @@ def lint(text: str, rules: list[dict], corpus_regex: re.Pattern | None) -> dict:
 
     severe = sum(1 for f in all_findings if f['severity'] == 'severe')
     structural = sum(1 for f in all_findings if f['severity'] == 'structural')
-    lexical = severe + structural
+    soft = sum(1 for f in all_findings if f['severity'] == 'structural-soft')
+    lexical = severe + structural  # soft signals are EXCLUDED from density
     density = round(lexical / word_count * 1000, 1) if word_count else 0.0
+
+    para_uniform, para_cv = evaluate_paragraph_uniformity(paragraphs)
 
     flagged_paras = set(
         [f['para'] for f in all_findings]
@@ -157,11 +174,14 @@ def lint(text: str, rules: list[dict], corpus_regex: re.Pattern | None) -> dict:
 
     return {
         'summary': {
-            'total': len(all_findings) + len(monotone_paras) + len(starter_paras),
+            'total': len(all_findings) + len(monotone_paras) + len(starter_paras) + (1 if para_uniform else 0),
             'severe': severe,
             'structural': structural,
+            'structural_soft': soft,
             'monotone_paragraphs': len(monotone_paras),
             'repeated_openers': len(starter_paras),
+            'paragraph_uniformity': para_uniform,
+            'paragraph_cv': para_cv,
             'clean_paragraphs': clean,
             'word_count': word_count,
             'paragraph_count': len(paragraphs),
@@ -201,6 +221,10 @@ def format_text(result: dict) -> str:
         lines.append(f"  ● {s['severe']} severe")
     if s['structural']:
         lines.append(f"  ● {s['structural']} structural / corpus")
+    if s.get('structural_soft'):
+        lines.append(f"  ● {s['structural_soft']} structural shape (soft signal, excl. density)")
+    if s.get('paragraph_uniformity'):
+        lines.append(f"  ● uniform paragraph lengths (CV={s['paragraph_cv']}, soft signal)")
     if s['monotone_paragraphs']:
         lines.append(f"  ● {s['monotone_paragraphs']} flat rhythm (softest signal)")
     if s['repeated_openers']:
@@ -210,7 +234,8 @@ def format_text(result: dict) -> str:
 
     lines.append(
         "Signals, not verdicts. Good human writers trigger some rules. "
-        "Isolated corpus hits ≠ AI; dense clusters are diagnostic."
+        "Isolated corpus hits ≠ AI; dense clusters are diagnostic. "
+        "Soft signals (shape, rhythm) are excluded from density."
     )
 
     # Per-paragraph findings
@@ -228,12 +253,17 @@ def format_text(result: dict) -> str:
     for pn in flagged_paras:
         lines.append(f"¶{pn}")
         for f in [x for x in findings if x['para'] == pn]:
-            sev = 'SEV' if f['severity'] == 'severe' else 'STR'
+            sev = 'SEV' if f['severity'] == 'severe' else 'SFT' if f['severity'] == 'structural-soft' else 'STR'
             lines.append(f"  [{sev}] {f['rule_name']}: \"{f['match']}\" — {f['message']}")
         if pn in monotone:
             lines.append(f"  [RHY] flat rhythm (σ={monotone[pn]}) — sentence lengths too uniform")
         if pn in starters:
             lines.append(f"  [RPT] repeated opener: \"{starters[pn]}\"")
+
+    if s.get('paragraph_uniformity'):
+        lines.append("")
+        lines.append("document")
+        lines.append(f"  [PUN] uniform paragraph lengths (CV={s['paragraph_cv']}) — soft structural signal")
 
     return '\n'.join(lines)
 
@@ -252,7 +282,9 @@ def _render_paragraph_html(para: str, rules: list[dict], corpus_regex: re.Patter
             start, end = m.start(), m.end()
             if any(s < end and e2 > start for s, e2 in occupied):
                 continue
-            cls = 'tic-severe' if rule['severity'] == 'severe' else 'tic-structural'
+            cls = ('tic-severe' if rule['severity'] == 'severe'
+                   else 'tic-soft' if rule['severity'] == 'structural-soft'
+                   else 'tic-structural')
             title = f"{rule['name']}: {rule['message']}"
             marks.append((start, end, cls, title))
             occupied.append((start, end))
@@ -311,8 +343,10 @@ def format_html(text: str, result: dict, rules: list[dict], corpus_regex: re.Pat
     n = 0
     for f in result['findings']:
         n += 1
-        sev = 'SEV' if f['severity'] == 'severe' else 'CRP' if f['kind'] == 'corpus' else 'CST' if f['severity'] == 'custom' else 'STR'
-        cls = 'sev-severe' if f['severity'] == 'severe' else 'sev-custom' if f['severity'] == 'custom' else 'sev-str'
+        sev = ('SEV' if f['severity'] == 'severe' else 'SFT' if f['severity'] == 'structural-soft'
+               else 'CRP' if f['kind'] == 'corpus' else 'CST' if f['severity'] == 'custom' else 'STR')
+        cls = ('sev-severe' if f['severity'] == 'severe' else 'sev-soft' if f['severity'] == 'structural-soft'
+               else 'sev-custom' if f['severity'] == 'custom' else 'sev-str')
         findings_lines.append(
             f'<div class="finding"><span class="sev {cls}">{sev}</span> '
             f'¶{f["para"]} &middot; {htmllib.escape(f["rule_name"])} &middot; '
@@ -331,6 +365,13 @@ def format_html(text: str, result: dict, rules: list[dict], corpus_regex: re.Pat
             f'<div class="finding"><span class="sev sev-rhy">RPT</span> '
             f'¶{st["para"]} &middot; repeated opener &ldquo;{htmllib.escape(st["starter"])}&rdquo;</div>'
         )
+    if s.get('paragraph_uniformity'):
+        n += 1
+        findings_lines.append(
+            f'<div class="finding"><span class="sev sev-soft">PUN</span> '
+            f'document &middot; uniform paragraph lengths (CV={s["paragraph_cv"]}) &mdash; '
+            f'soft structural signal</div>'
+        )
 
     from datetime import date
     export_date = date.today().strftime('%b %-d, %Y')
@@ -348,6 +389,7 @@ h1{{font-size:1rem;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo
 .tic-structural{{background:#fef9c3;border-bottom:2px solid #facc15;color:#713f12;position:relative;}}
 .tic-monotone{{background:#faf5ff;border-left:4px solid #a855f7;padding-left:.5rem;}}
 .tic-custom{{background:#ecfdf5;border-bottom:2px solid #34d399;color:#064e3b;position:relative;}}
+.tic-soft{{background:#e0f2fe;border-bottom:2px dotted #38bdf8;color:#075985;position:relative;}}
 mark[title]{{cursor:help;}}
 mark[title]:hover::after{{content:attr(title);position:absolute;bottom:calc(100% + 4px);left:0;background:#1e293b;color:#f8fafc;padding:5px 10px;border-radius:4px;font-size:.75rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;white-space:normal;width:300px;z-index:10;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.25);}}
 .pb{{margin-bottom:1.25rem;}}.pl{{font-size:.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#94a3b8;margin-bottom:.2rem;}}.pt{{white-space:pre-wrap;}}
@@ -355,7 +397,7 @@ mark[title]:hover::after{{content:attr(title);position:absolute;bottom:calc(100%
 .findings h2{{font-size:.875rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;margin-bottom:1rem;color:#475569;}}
 .finding{{margin-bottom:.6rem;font-size:.8rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;color:#334155;}}
 .sev{{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.65rem;font-weight:700;margin-right:.4rem;vertical-align:middle;}}
-.sev-severe{{background:#fee2e2;color:#991b1b;}}.sev-str{{background:#fef9c3;color:#92400e;}}.sev-custom{{background:#ecfdf5;color:#065f46;}}.sev-rhy{{background:#faf5ff;color:#6b21a8;}}
+.sev-severe{{background:#fee2e2;color:#991b1b;}}.sev-str{{background:#fef9c3;color:#92400e;}}.sev-custom{{background:#ecfdf5;color:#065f46;}}.sev-rhy{{background:#faf5ff;color:#6b21a8;}}.sev-soft{{background:#e0f2fe;color:#075985;}}
 </style>
 </head>
 <body>

@@ -1,5 +1,5 @@
 {
-  "_note": "Edit this file to add, remove, or adjust rules. Reload the app to pick up changes. Each rule needs: id, name, severity (severe|structural), pattern (JS regex string), flags, message.",
+  "_note": "Edit this file to add, remove, or adjust rules. Reload the app to pick up changes. Each rule needs: id, name, severity (severe|structural|structural-soft), pattern (JS regex string), flags, message. severe + structural feed the lexical density metric; structural-soft are noisier shape/structure signals that are flagged but EXCLUDED from density.",
   "rules": [
     {
       "id": "throat_clearing",
@@ -48,6 +48,30 @@
       "pattern": "(it['']s not just\\s+[\\w\\s,]+it['']s\\s+(also\\s+)?|not (only|just|merely)\\s+[\\w\\s,]+but (also\\s+)?|not because\\s+[\\w\\s]+\\s*but because)",
       "flags": "gi",
       "message": "Manufactured binary symmetry. Human speech drifts and digresses; it doesn't mirror."
+    },
+    {
+      "id": "sweeping_range",
+      "name": "Sweeping Range",
+      "severity": "structural-soft",
+      "pattern": "\\bfrom\\s+(?!time\\b)(?!scratch\\b)(?!now\\b)(?!day\\b)\\w+\\s+to\\s+\\w+\\b",
+      "flags": "gi",
+      "message": "‘From X to Y’ sweep. AI uses these to gesture at breadth; usually padding. Name the specific thing instead."
+    },
+    {
+      "id": "antithesis_framing",
+      "name": "Antithesis Framing",
+      "severity": "structural-soft",
+      "pattern": "(it['']?s not about\\s+[\\w\\s,]{1,40}?it['']?s about|less about\\s+[\\w\\s,]{1,40}?more about|the (question|point|issue) (is|isn['']?t|wasn['']?t)\\s+[\\w\\s,]{1,40}?it['']?s)",
+      "flags": "gi",
+      "message": "Manufactured ‘it’s not about X, it’s about Y’ contrast. State the point directly."
+    },
+    {
+      "id": "wrap_up_opener",
+      "name": "Wrap-Up Opener",
+      "severity": "structural-soft",
+      "pattern": "^(Ultimately|Overall|At the end of the day|When all is said and done|In the end|All in all|Taken together)[,\\s]",
+      "flags": "gim",
+      "message": "Formulaic conclusion opener. Cut it or replace with a concrete closing line."
     }
   ]
 }

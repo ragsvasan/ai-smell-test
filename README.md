@@ -39,7 +39,7 @@ Excess-vocabulary word list from [Kobak et al. 2025, *Science Advances*](https:/
 
 ## Rules
 
-Six structural rules in `rules.json`:
+Rules in `rules.json`:
 
 | Rule | Severity | What it catches |
 |---|---|---|
@@ -49,10 +49,20 @@ Six structural rules in `rules.json`:
 | Formulaic Transition | structural | Sentence-opening connectives ("Furthermore,", "Moreover,", "In conclusion,") |
 | Hedge Stack | structural | Doubled qualifiers ("may potentially", "could possibly") |
 | Symmetrical Contrast | structural | Manufactured binary framing ("not just X, but also Y") |
+| Sweeping Range | structural-soft | "From X to Y" breadth-gesturing ("from startups to enterprises") |
+| Antithesis Framing | structural-soft | "It's not about X, it's about Y" manufactured contrast |
+| Wrap-Up Opener | structural-soft | Formulaic conclusion openers ("Ultimately,", "Overall,", "At the end of the day,") |
 
-Plus two paragraph-level signals:
+Plus three structure/rhythm signals:
+- **Paragraph-length uniformity** — paragraph word-counts with coefficient of variation < 0.30 (AI produces suspiciously even paragraphs); document-level, soft signal
 - **Flat rhythm** — sentence-length std dev below 3.8 (labeled "softest signal"; can be human style)
 - **Repeated opener** — consecutive sentences starting with the same word
+
+### Lexical density vs. soft signals
+
+**`severe` + `structural`** rules feed the **lexical density** metric (flags per 1000 words) — the headline number.
+
+**`structural-soft`** rules, paragraph uniformity, flat rhythm, and repeated openers are **soft signals**: noisier shape/structure tells that good human writers also trigger. They are flagged and labeled, but **deliberately excluded from the density count** so they can't inflate the headline number or trip false positives. Treat them as context, not evidence.
 
 ---
 

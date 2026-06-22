@@ -40,9 +40,14 @@ Examples:
 
 ## Finding codes
 
+Density-feeding (lexical):
 - `[SEV]` — severe: strong AI signal (throat-clearing, grandiosity puffery)
 - `[STR]` — structural / corpus: LLM padding terms or Kobak et al. 2025 excess-vocabulary words
 - `[CRP]` — corpus-only hit: single word from the Kobak et al. 2025 excess-vocabulary list
+
+Soft signals (flagged but **excluded from lexical density** — good human writers trip these):
+- `[SFT]` — structural shape: "from X to Y" sweep, "not about X, it's about Y" antithesis, formulaic wrap-up openers
+- `[PUN]` — paragraph-length uniformity: paragraph word-counts suspiciously even (document-level)
 - `[RHY]` — flat rhythm: sentence-length std dev below 3.8 (softest signal — can be human style)
 - `[RPT]` — repeated sentence opener
 
