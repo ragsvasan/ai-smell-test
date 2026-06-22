@@ -93,17 +93,20 @@ Use `/ai-smell-test` as a slash command inside any Claude Code session.
 **Install:**
 
 ```bash
-# 1. Clone the repo
+# 1. Clone the repo (lint.py, corpus.json, rules.json live here)
 git clone https://github.com/ragsvasan/ai-smell-test ~/ai-smell-test
 
-# 2. Install the skill globally
-curl -fsSL https://raw.githubusercontent.com/ragsvasan/ai-smell-test/main/.claude/skills/ai-smell-test.md \
-  -o ~/.claude/skills/ai-smell-test.md
+# 2. Install the skill globally (skills must be a directory with SKILL.md inside)
+mkdir -p ~/.claude/skills/ai-smell-test
+curl -fsSL https://raw.githubusercontent.com/ragsvasan/ai-smell-test/main/.claude/skills/ai-smell-test/SKILL.md \
+  -o ~/.claude/skills/ai-smell-test/SKILL.md
 ```
 
 Then in any Claude Code session:
 ```
 /ai-smell-test path/to/draft.md
+/ai-smell-test --html draft.md    # annotated HTML export to send to a writer
+/ai-smell-test --json draft.md    # structured JSON for scripting
 ```
 
 ---
