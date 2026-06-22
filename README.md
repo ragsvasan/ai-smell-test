@@ -1,12 +1,35 @@
 # ai-smell-test
 
-A prose linter that flags writing patterns statistically overrepresented in AI-generated text.
+**An explainable prose-quality lens that runs on your own machine.** It shows you *which phrases* in your writing read as machine-generated, and *why* — so you can fix them.
+
+Not "is this AI" — **"where does my writing sound like a machine, and why?"**
 
 Two modalities, one corpus:
 - **Web SPA** — interactive, highlights flagged spans inline
 - **CLI** (`lint.py`) — headless, pipeable, JSON output for chaining
 
+## What this is — and isn't
+
+It is **not a detector** and **not a humanizer**. Those are different jobs, and this tool is deliberately neither:
+
+| | What it does | This tool |
+|---|---|---|
+| **Detectors** (GPTZero, Grammarly's detector) | Output a probability verdict — "98% AI" | ✗ — gives no verdict, no score |
+| **Humanizers** (Grubby, Dripwriter, Duey, Typeflo, Comet) | Rewrite text to *evade* detectors | ✗ — never rewrites for you |
+| **ai-smell-test** | Surface span-level evidence with a reason, for a human to act on | ✓ |
+
+**Why it's built this way:**
+
+- **Explainable, not a black box.** A detector tells a student "98% AI" with no recourse. This shows the *evidence* — every flagged span, the rule that caught it, and why — and leaves the judgment to you.
+- **Local, private, free, no account.** Paste a draft; nothing leaves your machine. Every SaaS competitor ingests your text. If you can't paste a confidential draft into a website, this is the point.
+- **For writers who want to sound less like a machine** — to write *better*, not to cheat a detector. Same person who'd hire an editor; opposite intent from a humanizer user.
+- **Transparent, forkable rules.** The entire detection logic is `corpus.json` + `rules.json` — auditable and editable. No competitor lets you see, let alone tune, theirs.
+
+**What it deliberately does not try to do:** win a detection-accuracy benchmark, or beat "humanizer" tools. Both are adversarial arms races against a published ruleset, and a transparent open-source tool can't win them. Its lane is human-in-the-loop revision, which doesn't overlap with the evasion race at all.
+
 **Philosophy:** signals, not verdicts. Lexical density matters more than presence. A single "moreover" in a 2000-word essay is noise; fifteen corpus hits in 300 words is a cluster worth examining. Good human writers trigger some rules.
+
+> ⚠️ The static ruleset decays as model output styles shift. What keeps it useful is the community-editable corpus — PRs to `corpus.json` and `rules.json` are the lifeblood, not a benchmark score.
 
 ---
 
