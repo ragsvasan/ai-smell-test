@@ -45,6 +45,7 @@ Rules in `rules.json`:
 |---|---|---|
 | Meta-Announcement | severe | Throat-clearing openers ("it is important to note that", "let's dive in") |
 | Grandiosity Puffery | severe | Scope inflation ("transformative", "groundbreaking", "paradigm shift") |
+| Section Sign | severe | The `§` character — rare in ordinary prose, often leaked LLM section-referencing (normal in legal/academic citation) |
 | PNAS Corpus Markers | structural | LLM padding terms ("robust", "leverage", "facilitate", "nuanced") |
 | Formulaic Transition | structural | Sentence-opening connectives ("Furthermore,", "Moreover,", "In conclusion,") |
 | Hedge Stack | structural | Doubled qualifiers ("may potentially", "could possibly") |

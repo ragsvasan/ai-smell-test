@@ -18,6 +18,14 @@
       "message": "Artificial inflation of scope. Replace with clear, unembellished nouns."
     },
     {
+      "id": "section_sign",
+      "name": "Section Sign",
+      "severity": "severe",
+      "pattern": "§",
+      "flags": "g",
+      "message": "The § character is rare in ordinary prose and often leaked LLM section-referencing. NOTE: normal in legal/academic citation — not a tell there."
+    },
+    {
       "id": "academic_bloat",
       "name": "PNAS Corpus Markers",
       "severity": "structural",
